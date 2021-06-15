@@ -6,11 +6,18 @@ from tqdm import tqdm
 import sys
 import traceback
 import mysql.connector
+import yaml
+import os.path
 
 class Player(Team):
     def __init__(self):
         super().__init__()
+        dict_variables = self.load_yaml(os.path.dirname(__file__) + "/../variables.yaml")
+        for key in dict_variables.keys():
+            setattr(self, key, dict_variables[key])
+
         self.list_player_urls = []
+        self.list_player_ids = []
         self.dict_row = {
             "team_url": None,
             "player_url": None,
@@ -122,6 +129,18 @@ class Player(Team):
             print("Connected to MySQL!")
         except Exception as e:
             print(e)
+
+        # Load all the 'player_id's already in the database
+        query_get_player_ids = f"""
+        SELECT player_id
+        FROM {self.mysql_table}
+        """
+        try:
+            rows = self.run_mysql_query(query_get_player_ids)
+            self.list_player_ids = [row[0] for row in rows]
+        except Exception as e:
+            print(e)
+
         try:
             self.run_mysql_query(self.query_create_table)
         except Exception as e:
@@ -134,13 +153,18 @@ class Player(Team):
         self.close_mysql_connection(self.connection)
         return
 
+    def load_yaml(self, path_file):
+        # Load YAML file
+        with open(path_file) as file_yaml:
+            return(yaml.load(file_yaml, Loader=yaml.FullLoader))
+
     def connect_to_mysql(self):
         connection = mysql.connector.connect(
-            host="127.0.0.1",
-            port=3306,
-            user="root",
-            password="12345",
-            database="fifa"
+            host=self.mysql_host,
+            port=self.mysql_port,
+            user=self.mysql_user,
+            password=self.mysql_password,
+            database=self.mysql_database
         )
         return(connection, connection.cursor())
     
@@ -173,7 +197,9 @@ class Player(Team):
                 href = a_class["href"]
                 player_url = "https://sofifa.com" + href
                 # self.list_player_urls.append([team_url, player_url])
-                self.list_dict_row.append(self.combine_player_info(BeautifulSoup(requests.get(player_url).content, "html.parser"), team_url, player_url))
+                player_id = player_url.split("/")[4]
+                if(player_id not in self.list_player_ids):
+                    self.list_dict_row.append(self.combine_player_info(BeautifulSoup(requests.get(player_url).content, "html.parser"), team_url, player_url))
         return
     
     def combine_player_info(self, soup, team_url, player_url):
@@ -240,7 +266,7 @@ class Player(Team):
             # self.list_dict_row.append(dict_row)
         
             # Inserting into the MySQL table
-
+            # if(player_id not in self.list_player_ids):
             columns = ", ".join(list(dict_row.keys()))
             values = ", ".join([f'"{item}"' for item in list(dict_row.values())])
             query = f"INSERT IGNORE INTO {self.mysql_table} ({columns}) VALUES ({values})"
