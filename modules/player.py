@@ -8,6 +8,7 @@ import traceback
 import mysql.connector
 import yaml
 import os.path
+import math
 
 class Player(Team):
     def __init__(self):
@@ -139,6 +140,7 @@ class Player(Team):
             rows = self.run_mysql_query(query_get_player_ids)
             self.list_player_ids = [row[0] for row in rows]
         except Exception as e:
+            self.list_player_ids = []
             print(e)
 
         try:
@@ -185,21 +187,30 @@ class Player(Team):
         except Exception as e:
             print(e)
             return(False)
+    
+    def divide_chunks(self, list_, chunk_size):
+        list_chunks = []
+        for i in range(0, len(list_), chunk_size):
+            # list_chunks.append(list_[i:i + chunk_size])
+            yield list_[i:i + chunk_size]
+        # return(list_chunks)
 
     def fetch_player_urls(self, list_team_urls):
-        for team_url in tqdm(list_team_urls):
-            soup = BeautifulSoup(requests.get(team_url).content, "html.parser")
-            table = soup.find("table", {"class":"table table-hover persist-area"})
-            table_body = table.find("tbody")
-            rows = table_body.find_all("tr")
-            for row in rows:
-                a_class = row.find("td", {"class": "col-name"}).find("a")
-                href = a_class["href"]
-                player_url = "https://sofifa.com" + href
-                # self.list_player_urls.append([team_url, player_url])
-                player_id = player_url.split("/")[4]
-                if(player_id not in self.list_player_ids):
-                    self.list_dict_row.append(self.combine_player_info(BeautifulSoup(requests.get(player_url).content, "html.parser"), team_url, player_url))
+        number_of_chunks = math.ceil(len(list_team_urls)/50)
+        for list_team_urls in tqdm(self.divide_chunks(list_team_urls, 50), desc=f"Chunk number out of {number_of_chunks}"):
+            for team_url in tqdm(list_team_urls):
+                soup = BeautifulSoup(requests.get(team_url).content, "html.parser")
+                table = soup.find("table", {"class":"table table-hover persist-area"})
+                table_body = table.find("tbody")
+                rows = table_body.find_all("tr")
+                for row in rows:
+                    a_class = row.find("td", {"class": "col-name"}).find("a")
+                    href = a_class["href"]
+                    player_url = "https://sofifa.com" + href
+                    # self.list_player_urls.append([team_url, player_url])
+                    player_id = player_url.split("/")[4]
+                    if(player_id not in self.list_player_ids):
+                        self.list_dict_row.append(self.combine_player_info(BeautifulSoup(requests.get(player_url).content, "html.parser"), team_url, player_url))
         return
     
     def combine_player_info(self, soup, team_url, player_url):
@@ -268,12 +279,16 @@ class Player(Team):
             # Inserting into the MySQL table
             # if(player_id not in self.list_player_ids):
             columns = ", ".join(list(dict_row.keys()))
+            # Remove quotes inside the values
+            for key, value in dict_row.items():
+                if(value is not None):
+                    dict_row[key] = value.replace("'", "").replace('"', "") if(any([quote in value for quote in ['"', "'"]])) else value
             values = ", ".join([f'"{item}"' for item in list(dict_row.values())])
             query = f"INSERT IGNORE INTO {self.mysql_table} ({columns}) VALUES ({values})"
             self.run_mysql_query(query)
         except Exception as e:
             traceback.print_exc()
-            print(team_url, player_url)
+            print(team_url, player_url, player_id)
             print(e)
             sys.exit(1)
         return(dict_row)
